@@ -40,10 +40,16 @@ not defence in depth; it is the reason the ordering is what it is.
 
 ```
 issue ──► QR ──► claim (Telegram) ──► grant on-chain ──► activate
-                      │                     │
+                      │                     │                │
+                      │                     │                └─ key is ARMED here
                       │                     └─ owner signs, in YOUR web session
                       └─ agent address is provisioned HERE, not before
 ```
+
+A claimed agent holds a key that **cannot sign anything**. Autonomous signing
+switches on at activation — deliberately downstream of the owner's on-chain
+grant, so the one moment the agent gains autonomy is anchored to the one
+consent in the flow that is a real wallet signature.
 
 **Do not reorder these steps.** Granting authority to an address before the
 claim would hand out a live agent to whoever scans first.
@@ -121,10 +127,16 @@ one.
 POST /api/platforms/:platform/telegram/handover/:bot/:id/activate
 ```
 
-**Call this only after the grant transaction confirms.** aomi takes your word
-for it — asserting early grants the agent no capability (it flips a row you
-already own), but it makes your own status display lie. This demo requires the
-tx hash as a discipline; production should verify the receipt, or read the
+**This is the call that turns on signing.** It arms the agent key (server-side,
+via a permit the key signs for itself) and then flips the row — arming first,
+so an `active` handover always implies an armed key, and a failed arm leaves
+you `claimed` and safe to retry.
+
+**Call it only after the grant transaction confirms.** aomi takes your word for
+it. Asserting early hands the agent no capability it can use — the key holds no
+venue authority until the owner's grant lands — but it switches on autonomy
+ahead of the consent that justifies it. This demo requires the tx hash as a
+discipline; production should verify the receipt, or read the
 `TraderPermission` event, before calling through.
 
 ### Revoke

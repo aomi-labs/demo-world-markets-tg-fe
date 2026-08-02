@@ -1,10 +1,13 @@
 /**
  * POST /api/handover/:bot/:id/activate — assert the venue grant landed.
  *
+ * This is the call that arms the agent key — until it lands, the key
+ * provisioned at claim time cannot sign anything.
+ *
  * The client sends the grant transaction hash. The demo requires it as a
  * discipline: activate is *partner-asserted*, so the only thing stopping you
- * from activating before the grant confirms is your own code. A production
- * integration should go further and verify the receipt (or read
+ * from switching on autonomy before the grant confirms is your own code. A
+ * production integration should go further and verify the receipt (or read
  * `TraderPermission`) server-side before calling through.
  */
 import { NextResponse } from 'next/server';

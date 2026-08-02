@@ -115,12 +115,17 @@ export function getHandover(id: number): Promise<HandoverStatus> {
 }
 
 /**
- * Flip a claimed handover live.
+ * Flip a claimed handover live — and arm the agent key.
  *
- * **Call this only after the venue grant transaction has confirmed.** The
- * backend takes your word for it — asserting it early grants no signing
- * capability (it only flips a row you already own), but it makes your own
- * status display lie about whether the agent can actually trade.
+ * **Call this only after the venue grant transaction has confirmed.** This is
+ * the call that escalates the agent key to autonomous signing: until it lands,
+ * the key provisioned at claim time cannot sign anything. The backend arms
+ * before flipping state, so an `active` handover always implies an armed key,
+ * and a failed arm leaves the handover `claimed` and safe to retry.
+ *
+ * Asserting it early still buys an attacker nothing — the key holds no venue
+ * authority until the owner's grant confirms — but it turns on signing ahead
+ * of the consent that justifies it. Confirm the receipt, then activate.
  */
 export function activateHandover(id: number): Promise<HandoverStatus> {
   const { platform, bot } = config();

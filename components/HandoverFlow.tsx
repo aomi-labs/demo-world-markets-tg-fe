@@ -10,6 +10,12 @@
  *
  * The grant lands *after* the claim, against an agent address that did not
  * exist when the QR was rendered. That is what makes a leaked QR worthless.
+ *
+ * Activation is also the moment the agent key gains the ability to sign at
+ * all: a claimed-but-not-activated agent holds a key that cannot sign
+ * anything. So the last step is not bookkeeping — it is the switch, and it is
+ * deliberately downstream of the owner's on-chain grant.
+ *
  * Do not reorder these steps.
  */
 
@@ -73,7 +79,7 @@ export function HandoverFlow({ botRegistrationId }: { botRegistrationId: string 
             instruments: ['ETH-PERP'],
             can_withdraw: false,
           },
-          ttl_seconds: 120,
+          ttl_seconds: 300,
         }),
       });
       const payload = await response.json();
@@ -338,6 +344,8 @@ export function HandoverFlow({ botRegistrationId }: { botRegistrationId: string 
             <p className="hint">
               This address did not exist when the QR was rendered. It is provisioned
               during the claim — which is exactly why a stolen QR grants nothing.
+              Right now the key <strong>cannot sign</strong>; it is armed at
+              activation, after you grant.
             </p>
             {grantTxHash ? (
               <p className="hint">
@@ -360,15 +368,15 @@ export function HandoverFlow({ botRegistrationId }: { botRegistrationId: string 
 
       <StepCard
         index={4}
-        title="Activate"
-        subtitle="Assert the grant landed. aomi takes your word for it."
+        title="Activate — turn on signing"
+        subtitle="Assert the grant landed. This is what arms the agent key."
         status={stepStatus([], ['active'])}
       >
         {phase === 'active' ? (
           <>
             <div className="banner banner--ok">
-              Agent is live. It can trade this account within your mandate, and cannot
-              withdraw.
+              Agent is live — key armed for autonomous signing. It can trade this
+              account within your mandate, and cannot withdraw.
             </div>
             <button className="btn btn--danger" onClick={revoke} disabled={busy}>
               Revoke
@@ -380,8 +388,9 @@ export function HandoverFlow({ botRegistrationId }: { botRegistrationId: string 
           </button>
         ) : (
           <p className="hint">
-            Send the grant first. Activating before it confirms does not grant the agent
-            anything — it only makes this page lie.
+            Send the grant first. Activating early arms the key against an account
+            that has not authorized it — the agent gains nothing it can act on, but
+            you have turned on signing ahead of consent. Keep the order.
           </p>
         )}
       </StepCard>
