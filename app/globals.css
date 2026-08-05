@@ -298,6 +298,367 @@ code {
   color: var(--muted);
 }
 
+/* The Product / Integration toggle. */
+.viewswitch {
+  display: flex;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 18px;
+}
+
+.viewswitch__tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 12px;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.viewswitch__tab small {
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.viewswitch__tab.is-on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+}
+
+/* Product-view surface: no step chrome, no numbers. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+}
+
+.card--ok {
+  border-color: var(--ok);
+}
+
+.card__title {
+  margin: 0 0 6px;
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+
+.card__lede {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.row .hint {
+  margin: 0;
+}
+
+.approve {
+  margin: 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.approve > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.approve dt {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.approve dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.select {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text);
+  font: inherit;
+}
+
+.select:disabled {
+  opacity: 0.6;
+}
+
+/* Section heading inside a setup card: purpose vs limits. */
+.grp {
+  margin: 26px 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.grp:first-of-type {
+  margin-top: 20px;
+}
+
+.card__lede--tight {
+  margin-bottom: 14px;
+}
+
+/* Preset picker for the standing brief. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+
+.chip {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+}
+
+.chip.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.ta {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+  width: 100%;
+}
+
+.ta:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* `fieldset` so the group has one accessible name; stripped of its chrome. */
+.fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Unit-bearing inputs: the $ and % live in the field, not in the label. */
+.adorn {
+  display: flex;
+  align-items: stretch;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.adorn:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.adorn input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: var(--text);
+  font: inherit;
+}
+
+.adorn input:focus {
+  outline: none;
+}
+
+.adorn__pre,
+.adorn__post {
+  display: grid;
+  place-items: center;
+  padding: 0 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.adorn__pre {
+  padding-right: 0;
+}
+
+.adorn__post {
+  padding-left: 0;
+}
+
+.fields--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.fields--row .field {
+  flex: 1 1 150px;
+}
+
+/* The aomi call a step makes. Method + path + who authenticates it. */
+.endpoint {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+  padding: 8px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.endpoint__verb {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: var(--accent);
+  color: #fff;
+}
+
+.endpoint__verb--get {
+  background: var(--ok);
+  color: #05231a;
+}
+
+.endpoint__verb--tx {
+  background: var(--danger);
+  color: #fff;
+}
+
+.endpoint__path {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.endpoint__auth {
+  color: var(--muted);
+  margin-left: auto;
+}
+
+/* required / optional tags on a field label. */
+.req,
+.opt {
+  margin-left: 6px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.req {
+  color: var(--danger);
+}
+
+.opt {
+  color: var(--muted);
+}
+
+.code-block__label {
+  margin: 14px 0 -4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.code-block {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 10px 0 16px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+}
+
+a.btn {
+  text-decoration: none;
+  display: inline-block;
+}
+
 .kv {
   display: flex;
   flex-direction: column;
@@ -320,4 +681,54 @@ code {
 .kv dd {
   margin: 0;
   font-size: 13px;
+}
+
+.hint--warn {
+  border-left: 2px solid var(--danger);
+  padding-left: 11px;
+}
+
+/* Collapsible payload panel — a demo aid inside the product screen. */
+.disclose {
+  margin-top: 20px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 10px 13px;
+}
+
+.disclose__head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  list-style: none;
+}
+
+.disclose__head::-webkit-details-marker {
+  display: none;
+}
+
+.disclose__head::before {
+  content: "▸";
+  font-size: 11px;
+}
+
+.disclose[open] .disclose__head::before {
+  content: "▾";
+}
+
+.disclose__note {
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.disclose__body .code-block {
+  margin-bottom: 4px;
+  max-height: 320px;
+  overflow: auto;
 }

@@ -78,16 +78,29 @@ async function call<T>(
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+
+  // Most aomi failures arrive as `{ ok: false, error, error_code }`. Body
+  // *rejections* do not: a malformed or schema-mismatched request is refused by
+  // the HTTP layer before aomi sees it, and comes back as plain text. Parsing
+  // that unguarded throws a `JSON.parse` error that buries the real reason —
+  // which is exactly the message you need when a field name is wrong.
+  let payload: { error?: string; error_code?: string } | null = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = null;
+    }
+  }
 
   if (!response.ok) {
     throw new AomiApiError(
       response.status,
-      payload?.error ?? `HTTP ${response.status}`,
+      payload?.error ?? text.trim() ?? `HTTP ${response.status}`,
       payload?.error_code,
     );
   }
-  return payload as T;
+  return (payload ?? {}) as T;
 }
 
 /**

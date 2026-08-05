@@ -2,7 +2,7 @@
  * POST /api/handover — issue a handover.
  *
  * Your origin, your session. In a real app this is where you authenticate the
- * user and derive `external_account` from *their* session — never from the
+ * user and derive `platform_account_ref` from *their* session — never from the
  * request body, or any logged-in user could mint an agent link for someone
  * else's account. The demo takes it from the body because it has no login.
  */
@@ -19,16 +19,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
   }
 
-  if (!body.external_account?.trim()) {
+  if (!body.platform_account_ref?.trim()) {
     return NextResponse.json(
-      { error: 'external_account is required' },
+      { error: 'platform_account_ref is required' },
       { status: 422 },
     );
   }
 
   try {
     const issued = await issueHandover({
-      external_account: body.external_account.trim(),
+      platform_account_ref: body.platform_account_ref.trim(),
       context: body.context,
       mandate: body.mandate,
       ttl_seconds: body.ttl_seconds,

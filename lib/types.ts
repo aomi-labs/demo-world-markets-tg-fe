@@ -33,7 +33,7 @@ export interface IssuedHandover {
 export interface HandoverStatus {
   handover_id: number;
   state: HandoverState;
-  external_account: string;
+  platform_account_ref: string;
   /** Telegram @handle of whoever claimed, once `claimed`. */
   claimed_handle: string | null;
   /**
@@ -55,7 +55,7 @@ export interface ApiError {
 }
 
 export interface IssueRequest {
-  external_account: string;
+  platform_account_ref: string;
   /**
    * Opaque to the backend — never interpreted for a decision. By convention
    * `summary` (else `intent`) is rendered in the agent's first Telegram
