@@ -401,11 +401,32 @@ export function IntegrationView({ h }: { h: Handover }) {
         )}
       </StepCard>
 
+      {/*
+        Revocation is a venue transaction, not an aomi call. There is no
+        browser-side aomi revoke — that route keeps the platform bearer this app
+        does not hold — and taking the authority back on chain is the stronger
+        fence anyway: the agent key cannot trade for an account that no longer
+        lists it, whatever aomi's own record says.
+      */}
+      {h.phase === 'revoking' ? (
+        <div className="banner" role="status">
+          <strong>Revocation submitted.</strong> <code>revokeTradingForAccount</code>{' '}
+          is broadcast but not yet mined, and <strong>the agent keeps its
+          authority until it is</strong>. Waiting for the receipt before calling
+          it done — a hash is not a confirmation.
+          {h.revokeTxHash ? (
+            <p className="hint">
+              Transaction <code>{h.revokeTxHash}</code>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {h.phase === 'revoked' ? (
         <div className="banner">
-          Revoked. aomi-side signing stopped immediately — but call{' '}
-          <code>revokeTradingForAccount</code> too, so the fence does not depend on us
-          being reachable.
+          <strong>Revoked, confirmed on chain.</strong> The venue has removed the
+          agent from this account&apos;s trader set, so it cannot place an order
+          — no aomi call was involved, and none is needed.
           <button className="btn" onClick={h.reset}>
             Start over
           </button>
