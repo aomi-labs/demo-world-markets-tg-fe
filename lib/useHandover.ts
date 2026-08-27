@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createWalletClient, custom, type Address } from 'viem';
+import { createPublicClient, createWalletClient, custom, http, type Address } from 'viem';
 
 import {
   QUOTE_SYMBOL,
@@ -48,6 +48,8 @@ export type Phase =
   | 'claimed'
   | 'granting'
   | 'active'
+  /** Revocation is on chain but not yet mined. */
+  | 'revoking'
   | 'revoked'
   /**
    * The session died before the page collected the claim result — it expired,
@@ -207,6 +209,7 @@ export function useHandover(botRegistrationId: string) {
   const [issued, setIssued] = useState<IssuedHandover | null>(null);
   const [status, setStatus] = useState<HandoverStatus | null>(null);
   const [grantTxHash, setGrantTxHash] = useState<string | null>(null);
+  const [revokeTxHash, setRevokeTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -518,16 +521,33 @@ export function useHandover(botRegistrationId: string) {
         transport: custom(ethereum as Parameters<typeof custom>[0]),
       });
       const [account] = await wallet.requestAddresses();
-      await wallet.writeContract({
+      const hash = await wallet.writeContract({
         account,
         address: exchangeAddress,
         abi: concordUserAbi,
         functionName: 'revokeTradingForAccount',
         args: [BigInt(accountId), status.agent_address as Address],
       });
+      setRevokeTxHash(hash);
+
+      // `writeContract` returns as soon as the transaction is *broadcast*. The
+      // agent keeps its authority until this is mined, so telling the user
+      // "access revoked" here would be a lie in the one place a lie is most
+      // expensive — someone deciding whether they still need to act.
+      setPhase('revoking');
+      const receipt = await createPublicClient({
+        chain: venueChain,
+        transport: http(),
+      }).waitForTransactionReceipt({ hash });
+      if (receipt.status !== 'success') {
+        throw new Error('The revocation transaction reverted. The agent still has access.');
+      }
       setPhase('revoked');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'revoke failed');
+      // Back to active: whatever went wrong, the agent still holds its
+      // authority, and the UI must keep offering the way to take it back.
+      setPhase('active');
     } finally {
       setBusy(false);
     }
@@ -539,6 +559,7 @@ export function useHandover(botRegistrationId: string) {
     setIssued(null);
     setStatus(null);
     setGrantTxHash(null);
+    setRevokeTxHash(null);
     setError(null);
     setPhase('setup');
     setSetupStarted(false);
@@ -582,6 +603,7 @@ export function useHandover(botRegistrationId: string) {
     issued,
     status,
     grantTxHash,
+    revokeTxHash,
     error,
     busy,
     expired: status?.state === 'expired',

@@ -371,16 +371,56 @@ export function ProductView({ h }: { h: Handover }) {
         </section>
       ) : null}
 
+      {h.phase === 'revoking' ? (
+        <section className="card">
+          <h2 className="card__title">Revoking access…</h2>
+          <p className="card__lede">
+            Your transaction is on its way. <strong>The agent keeps its
+            authority until it is mined</strong> — this page will say so when
+            the venue has actually dropped it.
+          </p>
+          {h.revokeTxHash ? (
+            <p className="hint">
+              Transaction <code>{h.revokeTxHash}</code>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       {h.phase === 'revoked' ? (
         <section className="card">
           <h2 className="card__title">Agent access revoked</h2>
           <p className="card__lede">
-            It stopped trading immediately. Send{' '}
-            <code>revokeTradingForAccount</code> on-chain too, so the fence
-            doesn&apos;t depend on us being reachable.
+            Confirmed on chain. The venue no longer lists the agent as a trader
+            for this account, so it cannot place an order whatever anyone
+            else&apos;s records say.
           </p>
           <button className="btn" onClick={h.reset}>
             Set up a new agent
+          </button>
+        </section>
+      ) : null}
+
+      {/*
+        The link ended before it produced an agent — the QR ran out, the
+        connection expired, or the result was already collected. There is no way
+        to resume any of those, so the only honest control here is a restart.
+        Without this card the user is left staring at an error banner with
+        nothing to click.
+      */}
+      {h.phase === 'session-lost' ? (
+        <section className="card">
+          <h2 className="card__title">This link expired</h2>
+          <p className="card__lede">
+            {h.error ??
+              'The setup link is no longer valid. Nothing was authorized, and your account is untouched.'}
+          </p>
+          <p className="hint">
+            Links are deliberately short-lived. Generating a new one starts a
+            fresh handover — the previous QR code can never be used again.
+          </p>
+          <button className="btn btn--primary" onClick={h.reset}>
+            Generate a new QR code
           </button>
         </section>
       ) : null}
