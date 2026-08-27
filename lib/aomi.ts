@@ -1,54 +1,47 @@
 /**
- * Server-only client for the aomi handover API.
+ * Browser-direct client for the aomi handover API.
  *
- * ## Why this file exists at all
+ * ## Why there is no server in this file any more
  *
- * The platform activation bearer is a **secret**. It authorizes issuing and
- * revoking handovers for every bot your platform owns, so it must never reach
- * a browser. That is the whole reason this demo has server route handlers
- * instead of calling aomi directly from React: the browser talks to *your*
- * origin, and your origin holds the bearer.
+ * The previous version routed everything through Next route handlers so the
+ * platform activation bearer could stay server-side. That bearer is a
+ * **platform-wide** credential — whoever holds it can mint and revoke agent
+ * links for every user of the venue — so hiding it was not optional.
  *
- * Copy this pattern. A partner that ships the bearer to the client has handed
- * out the ability to mint agent links for their entire user base.
+ * This app is open source and has no server to hide it in. So the credential
+ * changed instead of the hiding place: each request now carries a signature
+ * from the account owner's own wallet. That is strictly narrower than the
+ * bearer ever was. A leaked signature authorizes one action on one handover;
+ * a leaked bearer authorized everything.
+ *
+ * ## What the browser holds
+ *
+ * One thing, and only between issue and claim: a **status-only session**,
+ * minted by aomi in the issue response. It reads this one handover's status and
+ * nothing else — it cannot activate, cannot revoke, and has no renewal path.
+ * The moment the page collects the claim result the session is spent
+ * server-side; if it expires first, the user re-issues and re-scans.
+ *
+ * Keep it in memory. `sessionStorage` would survive a refresh, which is a
+ * convenience and not a security property — anything that can read one can read
+ * the other.
  */
-import 'server-only';
 
-import type { HandoverStatus, IssueRequest, IssuedHandover } from './types';
+import { buildSiweMessage, renderStatement, type HandoverStatement } from '@/lib/statement';
+import { venueChain, venueOrigin } from '@/lib/venue';
+import type { HandoverStatus, IssuedHandover, MintedNonce } from '@/lib/types';
 
-/** Reads config at call time, not module load, so a missing var is a clear error. */
-function config() {
-  const base = process.env.AOMI_BACKEND_URL;
-  const platform = process.env.AOMI_PLATFORM_NAME;
-  const bearer = process.env.AOMI_PLATFORM_TOKEN;
-  const bot = process.env.AOMI_BOT_REGISTRATION_ID;
+/** Where the aomi API lives. Public: it is an address, not a secret. */
+const BASE = (process.env.NEXT_PUBLIC_AOMI_BACKEND_URL ?? 'https://api.aomi.dev').replace(
+  /\/$/,
+  '',
+);
 
-  const missing = [
-    ['AOMI_BACKEND_URL', base],
-    ['AOMI_PLATFORM_NAME', platform],
-    ['AOMI_PLATFORM_TOKEN', bearer],
-    ['AOMI_BOT_REGISTRATION_ID', bot],
-  ]
-    .filter(([, value]) => !value)
-    .map(([name]) => name);
+/** The platform, as it appears in `/api/platforms/:name/...`. */
+const PLATFORM = process.env.NEXT_PUBLIC_AOMI_PLATFORM_NAME ?? 'world-market-apps';
 
-  if (missing.length > 0) {
-    throw new Error(
-      `missing env: ${missing.join(', ')} — copy .env.example to .env.local`,
-    );
-  }
-  return {
-    base: base!.replace(/\/$/, ''),
-    platform: platform!,
-    bearer: bearer!,
-    bot: bot!,
-  };
-}
-
-/** The bot registration this demo issues against. Safe to expose — it is an id, not a credential. */
-export function botRegistrationId(): string {
-  return config().bot;
-}
+/** The header the status session travels on. Deliberately not `Authorization`. */
+const SESSION_HEADER = 'X-Aomi-Handover-Session';
 
 export class AomiApiError extends Error {
   constructor(
@@ -64,26 +57,23 @@ export class AomiApiError extends Error {
 async function call<T>(
   method: 'GET' | 'POST',
   path: string,
-  body?: unknown,
+  options: { body?: unknown; session?: string } = {},
 ): Promise<T> {
-  const { base, bearer } = config();
-  const response = await fetch(`${base}${path}`, {
+  const headers: Record<string, string> = {};
+  if (options.body) headers['Content-Type'] = 'application/json';
+  if (options.session) headers[SESSION_HEADER] = options.session;
+
+  const response = await fetch(`${BASE}${path}`, {
     method,
-    headers: {
-      Authorization: `Bearer ${bearer}`,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
     cache: 'no-store',
   });
 
   const text = await response.text();
-
-  // Most aomi failures arrive as `{ ok: false, error, error_code }`. Body
-  // *rejections* do not: a malformed or schema-mismatched request is refused by
-  // the HTTP layer before aomi sees it, and comes back as plain text. Parsing
-  // that unguarded throws a `JSON.parse` error that buries the real reason —
-  // which is exactly the message you need when a field name is wrong.
+  // Most aomi failures arrive as `{ ok: false, error, error_code }`. A body
+  // rejected by the HTTP layer before aomi sees it comes back as plain text,
+  // and parsing that unguarded throws a JSON error that buries the real reason.
   let payload: { error?: string; error_code?: string } | null = null;
   if (text) {
     try {
@@ -92,7 +82,6 @@ async function call<T>(
       payload = null;
     }
   }
-
   if (!response.ok) {
     throw new AomiApiError(
       response.status,
@@ -103,63 +92,159 @@ async function call<T>(
   return (payload ?? {}) as T;
 }
 
+/** The injected provider, or a readable failure. */
+function provider(): { request: (args: unknown) => Promise<unknown> } {
+  const ethereum = (globalThis as { ethereum?: { request?: (a: unknown) => Promise<unknown> } })
+    .ethereum;
+  if (!ethereum?.request) throw new Error('No wallet found. Install or unlock one to continue.');
+  return ethereum as { request: (args: unknown) => Promise<unknown> };
+}
+
 /**
- * Mint a handover and get the one-time token back.
+ * Ask aomi what to sign, then sign exactly that.
  *
- * Fails with **409** when an `active` handover already holds this account's
- * slot. That is not a retryable error: replacing a live agent is an explicit
- * revoke, never a side effect of issuing again. Surface it as "this account
- * already has an agent" and offer the revoke.
+ * The statement comes back from the server rather than being composed here.
+ * Both sides can render it — see `lib/statement.ts` — but only one of them gets
+ * to decide, and it is the side that will verify. Signing the server's own
+ * words removes a class of "the page and the backend disagreed" bug that would
+ * otherwise surface as an unexplained rejection.
+ *
+ * The message string is signed and sent unchanged. Rebuilding it on the way out
+ * could alter a byte, and the signature covers bytes.
  */
-export function issueHandover(request: IssueRequest): Promise<IssuedHandover> {
-  const { platform, bot } = config();
-  return call<IssuedHandover>('POST', `/api/platforms/${platform}/telegram/handover`, {
-    bot_registration_id: bot,
-    ...request,
+async function signForAomi(
+  owner: string,
+  request: { action: 'issue'; accountId: string } | { action: 'activate'; handoverId: number },
+): Promise<{ siwe_message: string; siwe_signature: string }> {
+  const nonce = await call<MintedNonce>(
+    'POST',
+    `/api/platforms/${PLATFORM}/telegram/handover/nonce`,
+    {
+      body:
+        request.action === 'issue'
+          ? { action: 'issue', owner_address: owner, account_id: request.accountId }
+          : { action: 'activate', handover_id: request.handoverId },
+    },
+  );
+
+  const message = buildSiweMessage({
+    domain: nonce.domain,
+    address: owner,
+    statement: nonce.statement,
+    uri: nonce.uri,
+    chainId: nonce.chain_id,
+    nonce: nonce.nonce,
+  });
+
+  const signature = (await provider().request({
+    method: 'personal_sign',
+    params: [message, owner],
+  })) as string;
+
+  return { siwe_message: message, siwe_signature: signature };
+}
+
+/** Render locally — for showing the user what they are about to approve. */
+export function previewStatement(statement: HandoverStatement): string {
+  return renderStatement(statement);
+}
+
+/** The wallet currently connected, prompting if necessary. */
+export async function connectWallet(): Promise<string> {
+  const accounts = (await provider().request({ method: 'eth_requestAccounts' })) as string[];
+  const account = accounts?.[0];
+  if (!account) throw new Error('Wallet returned no account.');
+  return account;
+}
+
+/**
+ * Mint a handover. **Signature one of two.**
+ *
+ * Fails with 409 when an `active` handover already holds this account's slot —
+ * not retryable: replacing a live agent is an explicit revoke, never a side
+ * effect of issuing again.
+ *
+ * The `platform_account_ref` sent here is proved on chain before anything is
+ * written: aomi reads the venue registry in both directions and refuses if the
+ * wallet does not own exactly that account.
+ */
+export async function issueHandover(
+  owner: string,
+  body: Record<string, unknown> & { platform_account_ref: string },
+): Promise<IssuedHandover> {
+  const signed = await signForAomi(owner, {
+    action: 'issue',
+    accountId: body.platform_account_ref,
+  });
+  return call<IssuedHandover>('POST', `/api/platforms/${PLATFORM}/telegram/handover`, {
+    body: { ...body, ...signed },
   });
 }
 
-export function getHandover(id: number): Promise<HandoverStatus> {
-  const { platform, bot } = config();
+/**
+ * Poll one handover with the status session.
+ *
+ * Two shapes, and the difference is the design:
+ *
+ * * while `pending`, this returns state and nothing else, as often as asked;
+ * * on the **first call after Telegram claims**, it returns the claimed handle
+ *   and the agent address — and spends the session doing it.
+ *
+ * So a `401` after a successful read is not a bug; it is the session having
+ * done its job. A `401` *before* one means the session expired, and the only
+ * way forward is a fresh issue — there is no re-auth.
+ */
+export function getHandoverStatus(
+  botRegistrationId: string,
+  handoverId: number,
+  session: string,
+): Promise<HandoverStatus> {
   return call<HandoverStatus>(
-    'GET',
-    `/api/platforms/${platform}/telegram/handover/${bot}/${id}`,
+    'POST',
+    `/api/platforms/${PLATFORM}/telegram/handover/${botRegistrationId}/${handoverId}/status`,
+    { session },
   );
 }
 
 /**
- * Flip a claimed handover live — and arm the agent key.
+ * Arm the agent key. **Signature two of two.**
  *
- * **Call this only after the venue grant transaction has confirmed.** This is
- * the call that escalates the agent key to autonomous signing: until it lands,
- * the key provisioned at claim time cannot sign anything. The backend arms
- * before flipping state, so an `active` handover always implies an armed key,
- * and a failed arm leaves the handover `claimed` and safe to retry.
- *
- * Asserting it early still buys an attacker nothing — the key holds no venue
- * authority until the owner's grant confirms — but it turns on signing ahead
- * of the consent that justifies it. Confirm the receipt, then activate.
+ * Call it only after the venue grant transaction has confirmed. aomi will not
+ * take the page's word for it — it reads the account's live trader set and
+ * refuses if the agent is not in it — so activating early fails rather than
+ * arming something the venue has not authorized.
  */
-export function activateHandover(id: number): Promise<HandoverStatus> {
-  const { platform, bot } = config();
+export async function activateHandover(
+  owner: string,
+  botRegistrationId: string,
+  handoverId: number,
+): Promise<HandoverStatus> {
+  const signed = await signForAomi(owner, { action: 'activate', handoverId });
   return call<HandoverStatus>(
     'POST',
-    `/api/platforms/${platform}/telegram/handover/${bot}/${id}/activate`,
+    `/api/platforms/${PLATFORM}/telegram/handover/${botRegistrationId}/${handoverId}/activate`,
+    { body: signed },
   );
 }
 
 /**
- * Terminate a handover and tighten the agent key back to `denied`.
+ * The bot handovers hang off.
  *
- * Retry-safe: revoking an already-terminal handover reports current state
- * rather than failing. This stops aomi-side signing immediately; it does NOT
- * revoke on-chain authority — pair it with `revokeTradingForAccount` for the
- * unilateral fence.
+ * Public, and safe to be: it is an identifier, not a credential. The backend
+ * pins the bot from its own venue config regardless of what a request names, so
+ * a wrong value here is refused rather than honoured.
  */
-export function revokeHandover(id: number): Promise<HandoverStatus> {
-  const { platform, bot } = config();
-  return call<HandoverStatus>(
-    'POST',
-    `/api/platforms/${platform}/telegram/handover/${bot}/${id}/revoke`,
-  );
+export function botRegistrationId(): string {
+  const bot = process.env.NEXT_PUBLIC_AOMI_BOT_REGISTRATION_ID;
+  if (!bot) {
+    throw new Error(
+      'missing NEXT_PUBLIC_AOMI_BOT_REGISTRATION_ID — copy .env.example to .env.local',
+    );
+  }
+  return bot;
 }
+
+/** The chain the venue lives on, for callers building the grant transaction. */
+export const venueChainId = venueChain.id;
+/** The origin the backend pins signatures to. Exported for the preview panel. */
+export const siweOrigin = venueOrigin;

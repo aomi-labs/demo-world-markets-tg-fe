@@ -1,9 +1,9 @@
 /**
  * The wire shapes of the aomi handover API.
  *
- * These mirror `bin/backend/src/endpoint/platform/handover.rs` in the aomi
- * backend. Everything the backend returns is listed here; there are no hidden
- * fields.
+ * These mirror `aomi/bin/manager/src/platform/handover.rs` and
+ * `handover_wallet.rs`. Everything the backend returns is listed here; there
+ * are no hidden fields.
  */
 
 /** The handover lifecycle. `expired` is derived from `expires_at`, not stored. */
@@ -27,6 +27,34 @@ export interface IssuedHandover {
   expires_at: number;
   /** The bot to build the deep link against, e.g. `world_markets_bot`. */
   bot_username: string | null;
+  /**
+   * The status-only session, returned **exactly once, here**. Only its hash is
+   * stored, under a different type domain from `token`, so neither can be
+   * presented as the other.
+   *
+   * It reads this one handover's status and nothing else, and it is spent
+   * server-side the moment the page collects the claim result. Absent on the
+   * platform-bearer channel, which has no browser to hand it to.
+   */
+  session?: string;
+  /** Unix seconds. Independent of `expires_at` — it has to outlast a trip to Telegram. */
+  session_expires_at?: number | null;
+}
+
+/**
+ * What the backend says to sign.
+ *
+ * `statement` is authoritative: the browser signs the server's own words rather
+ * than composing its own, because the server rebuilds and compares this string
+ * whole when the signature comes back.
+ */
+export interface MintedNonce {
+  nonce: string;
+  statement: string;
+  domain: string;
+  uri: string;
+  chain_id: number;
+  expires_at: number;
 }
 
 /** Response to status / activate / revoke. Never contains the token. */
@@ -56,6 +84,9 @@ export interface ApiError {
 
 export interface IssueRequest {
   platform_account_ref: string;
+  /** The EIP-4361 message, verbatim as signed. Never re-serialize it. */
+  siwe_message?: string;
+  siwe_signature?: string;
   /**
    * Opaque to the backend — never interpreted for a decision. By convention
    * `summary` (else `intent`) is rendered in the agent's first Telegram

@@ -13,35 +13,48 @@
 import { defineChain } from 'viem';
 
 /**
- * MegaETH mainnet — chain 4326.
+ * The venue's dev chain — Puffer UniFi testnet, chain 2092151908.
  *
- * The RPC must be `mainnet.megaeth.com`. `carrot.megaeth.com` is the **testnet**
- * (chain 6343) and the exchange has no code deployed there, so a grant sent
- * against it fails with a chain mismatch or hits an empty address. Verified
- * 2026-08-03 against both endpoints.
+ * **The partner runs three deployments and two of them are live with the same
+ * ABI**, so pointing at the wrong one fails silently rather than loudly:
+ *
+ * | Their URL         | Chain                     | Registry      |
+ * | ----------------- | ------------------------- | ------------- |
+ * | `dev.wcm.inc`     | 2092151908 (Puffer UniFi) | `0xf6b54e03…` |
+ * | `staging.wcm.inc` | 4326 (MegaETH)            | `0x5e3Ae52E…` |
+ * | `world.inc`       | production                | not yet known |
+ *
+ * This app targets **dev**. Confirmed with the partner 2026-08-25 and measured
+ * against the live RPC: `getUserAddress(18)` there returns the test account,
+ * which the MegaETH deployment knows nothing about.
  */
-export const megaeth = defineChain({
-  id: 4326,
-  name: 'MegaETH',
+export const venueChain = defineChain({
+  id: 2_092_151_908,
+  name: 'Puffer UniFi Testnet',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: {
     default: {
-      http: [process.env.NEXT_PUBLIC_MEGAETH_RPC_URL ?? 'https://mainnet.megaeth.com/rpc'],
+      http: [
+        process.env.NEXT_PUBLIC_VENUE_RPC_URL ?? 'https://testnet-unifi-rpc.puffer.fi/',
+      ],
     },
   },
 });
 
-/** The Concord exchange. Override per environment via NEXT_PUBLIC_VENUE_EXCHANGE_ADDRESS. */
+/** The Concord exchange on dev. Override per environment. */
 export const exchangeAddress = (process.env.NEXT_PUBLIC_VENUE_EXCHANGE_ADDRESS ??
-  '0x5e3Ae52EbA0F9740364Bd5dd39738e1336086A8b') as `0x${string}`;
+  '0xf6b54e033bb45a583aa642924bcef78b804588ae') as `0x${string}`;
 
 /**
- * Only the two calls this flow needs, from `IConcordProtocolUser`.
+ * The origin the backend pins SIWE messages to.
  *
- * `accountId` is the venue's `uint64` user id — the same value you pass to
- * aomi as `platform_account_ref`. Keeping those identical is what lets the agent's
- * reads and the grant refer to the same account.
+ * Sent as both `domain` and `uri` in the signed message and compared
+ * byte-exactly server-side, so this must be the origin the page is actually
+ * served from — no trailing slash, matching `window.location.origin`.
  */
+export const venueOrigin =
+  process.env.NEXT_PUBLIC_VENUE_ORIGIN ?? 'https://dev.wcm.inc';
+
 export const concordUserAbi = [
   {
     type: 'function',
