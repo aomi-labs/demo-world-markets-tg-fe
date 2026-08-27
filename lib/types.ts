@@ -61,7 +61,18 @@ export interface MintedNonce {
 export interface HandoverStatus {
   handover_id: number;
   state: HandoverState;
-  platform_account_ref: string;
+  /**
+   * Set when the handover reached a terminal state without producing a result —
+   * the QR ran out, or it was revoked.
+   *
+   * Distinct from a `401` on purpose. The session outlives the 90-second claim
+   * window, so an expired QR is a perfectly valid session reporting bad news;
+   * reading the status code alone cannot tell that from a session that actually
+   * went bad, and the two need different copy.
+   */
+  restart_required?: boolean;
+  /** Absent while the handover is still `pending` — there is nothing to report yet. */
+  platform_account_ref?: string;
   /** Telegram @handle of whoever claimed, once `claimed`. */
   claimed_handle: string | null;
   /**

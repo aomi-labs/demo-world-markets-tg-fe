@@ -354,8 +354,19 @@ export function useHandover(botRegistrationId: string) {
         try {
           const next = await getHandoverStatus(botRegistrationId, handoverId, session);
           setStatus(next);
-          if (next.state === 'expired' || next.state === 'revoked') {
+          if (next.restart_required) {
+            // The handover is over and produced nothing — the QR ran out, or it
+            // was revoked. The session is still fine, which is exactly why the
+            // backend says so in the body rather than by refusing: a 401 here
+            // would read as "your credential broke" and send the user looking
+            // in the wrong place.
             stopPolling();
+            setPhase('session-lost');
+            setError(
+              next.state === 'revoked'
+                ? 'This handover was revoked. Generate a new QR code to start again.'
+                : 'The QR code expired before it was scanned. Generate a new one.',
+            );
             return;
           }
           if (next.state !== 'pending') {
@@ -366,6 +377,9 @@ export function useHandover(botRegistrationId: string) {
           }
         } catch (caught) {
           if (caught instanceof AomiApiError && caught.status === 401) {
+            // Now unambiguous: the backend reports a dead handover in the body,
+            // so a refusal here means the *session* is gone — it timed out, or
+            // it was already spent collecting the result.
             stopPolling();
             setPhase('session-lost');
             setError(
