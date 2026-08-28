@@ -440,7 +440,14 @@ export function useHandover(botRegistrationId: string) {
    * never by the agent and never in Telegram.
    */
   const grantVenueAuthority = useCallback(async () => {
-    if (!status?.agent_address) return;
+    if (!status?.agent_address) {
+      setError('Telegram has not supplied an agent address yet. Re-open the claimed handover and try again.');
+      return;
+    }
+    if (!ownerWallet) {
+      setError('Reconnect the wallet that owns this World Markets account before granting authority.');
+      return;
+    }
     setBusy(true);
     setError(null);
     setPhase('granting');
@@ -452,7 +459,12 @@ export function useHandover(botRegistrationId: string) {
         chain: venueChain,
         transport: custom(ethereum as Parameters<typeof custom>[0]),
       });
+      await wallet.switchChain({ id: venueChain.id });
       const [account] = await wallet.requestAddresses();
+      if (!account) throw new Error('Wallet returned no account.');
+      if (account.toLowerCase() !== ownerWallet.toLowerCase()) {
+        throw new Error('The selected wallet does not own this handover. Switch back to the wallet that issued it.');
+      }
 
       const hash = await wallet.writeContract({
         account,
@@ -470,7 +482,7 @@ export function useHandover(botRegistrationId: string) {
     } finally {
       setBusy(false);
     }
-  }, [accountId, status?.agent_address]);
+  }, [accountId, ownerWallet, status?.agent_address]);
 
   /**
    * Signature two of two — the moment the agent key gains the ability to sign.
