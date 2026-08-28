@@ -56,17 +56,52 @@ export function IntegrationView({ h }: { h: Handover }) {
         </div>
       ) : null}
 
+      {/*
+        Terminal, and not resumable: the QR ran out, the session expired, or the
+        claim result was already collected. None of those have a "continue" —
+        the only honest control is a restart, and leaving the flow rendered
+        behind an error banner invites the reader to look for one that is not
+        there.
+      */}
+      {h.phase === 'session-lost' ? (
+        <div className="banner banner--error" role="status">
+          <strong>This handover ended.</strong> Sessions are single-use and
+          short-lived by design, and there is no re-auth path — issue a new
+          handover to start again.{' '}
+          <button className="btn" onClick={h.reset}>
+            Start over
+          </button>
+        </div>
+      ) : null}
+
       <StepCard
         index={1}
         title="Issue the handover"
-        subtitle="Your server calls aomi and gets back a one-time token."
+        subtitle="The browser signs with the account owner's wallet. No server, no bearer."
         status={h.phase === 'setup' ? 'active' : 'done'}
       >
         <Endpoint
           method="POST"
-          path="/api/platforms/:platform/telegram/handover"
-          auth="platform activation bearer · server-side only"
+          path="/api/platforms/:platform/telegram/handover/nonce"
+          auth="public · ask aomi what to sign"
         />
+        <Endpoint
+          method="POST"
+          path="/api/platforms/:platform/telegram/handover"
+          auth="SIWE signature · from the browser"
+        />
+        <p className="hint">
+          <strong>You do not need a backend for this.</strong> A platform bearer
+          would authorize agent links for every user of the venue, so it could
+          never reach a browser — but a wallet signature authorizes exactly one
+          action on one handover, so it can. Ask <code>/nonce</code> what to
+          sign, sign that string unchanged, send it with the issue call.
+        </p>
+        <p className="hint">
+          aomi proves the account is yours before writing anything: it reads the
+          venue registry in <strong>both</strong> directions and refuses if the
+          wallet does not own exactly the account named.
+        </p>
 
         <div className="fields">
           <label className="field">
@@ -210,10 +245,13 @@ export function IntegrationView({ h }: { h: Handover }) {
         <PayloadPreview body={h.issueBody} />
 
         <p className="hint">
-          Responds <code>{'{ handover_id, token, expires_at, bot_username }'}</code>.
-          The <code>token</code> is returned <strong>once</strong> — aomi stores
-          only its hash. Build <code>t.me/&lt;bot_username&gt;?start=&lt;token&gt;</code>{' '}
-          and render it yourself.
+          Responds{' '}
+          <code>{'{ handover_id, token, session, expires_at, bot_username }'}</code>.
+          Both <code>token</code> and <code>session</code> come back{' '}
+          <strong>once</strong> — aomi stores only their hashes, under separate
+          type domains so neither can be presented as the other. Build{' '}
+          <code>t.me/&lt;bot_username&gt;?start=&lt;token&gt;</code> and render it
+          yourself. Keep <code>session</code> in memory, not storage.
         </p>
 
         {h.phase === 'setup' ? (
@@ -227,13 +265,22 @@ export function IntegrationView({ h }: { h: Handover }) {
         index={2}
         title="Wait for the claim"
         subtitle="One-time token, short TTL, zero authority. Poll until it flips."
-        status={stepStatus(['awaiting-scan'], ['claimed', 'granting', 'active', 'revoked'])}
+        status={stepStatus(['awaiting-scan'], ['claimed', 'granting', 'active', 'revoking', 'revoked'])}
       >
         <Endpoint
-          method="GET"
-          path="/api/platforms/:platform/telegram/handover/:bot/:id"
-          auth="platform activation bearer · poll every 2s"
+          method="POST"
+          path="/api/platforms/:platform/telegram/handover/:bot/:id/status"
+          auth="status session · X-Aomi-Handover-Session · poll every 2s"
         />
+        <p className="hint">
+          The session reads <em>this</em> handover&apos;s status and nothing
+          else — it cannot activate, cannot revoke, and has no renewal path. The
+          call that returns <code>agent_address</code> is the same call that
+          spends it, so poll until the state leaves <code>pending</code> and then
+          stop. A later refusal is the session having done its job, not a fault;
+          a refusal before that means it expired, and the only way on is a fresh
+          issue.
+        </p>
         {h.deepLink && h.phase === 'awaiting-scan' ? (
           <>
             <QrPanel
@@ -266,7 +313,7 @@ export function IntegrationView({ h }: { h: Handover }) {
         index={3}
         title="Grant trading authority"
         subtitle="The custody step. Signed here, in the web session — never in Telegram."
-        status={stepStatus(['claimed', 'granting'], ['active', 'revoked'])}
+        status={stepStatus(['claimed', 'granting'], ['active', 'revoking', 'revoked'])}
       >
         <Endpoint
           method="TX"
@@ -321,8 +368,16 @@ export function IntegrationView({ h }: { h: Handover }) {
         <Endpoint
           method="POST"
           path="/api/platforms/:platform/telegram/handover/:bot/:id/activate"
-          auth="platform activation bearer · server-side only"
+          auth="SIWE signature · second and last"
         />
+        <p className="hint">
+          aomi does not take your word for the grant. Before arming anything it
+          checks four things, each a refusal on its own: neither address is
+          zero, the signer is this handover&apos;s own owner, the registry agrees
+          in both directions, and the agent is in the account&apos;s{' '}
+          <strong>live</strong> trader set. So calling this early fails rather
+          than arming a key the venue has not authorized.
+        </p>
         {h.phase === 'active' ? (
           <>
             <div className="banner banner--ok">
@@ -346,11 +401,32 @@ export function IntegrationView({ h }: { h: Handover }) {
         )}
       </StepCard>
 
+      {/*
+        Revocation is a venue transaction, not an aomi call. There is no
+        browser-side aomi revoke — that route keeps the platform bearer this app
+        does not hold — and taking the authority back on chain is the stronger
+        fence anyway: the agent key cannot trade for an account that no longer
+        lists it, whatever aomi's own record says.
+      */}
+      {h.phase === 'revoking' ? (
+        <div className="banner" role="status">
+          <strong>Revocation submitted.</strong> <code>revokeTradingForAccount</code>{' '}
+          is broadcast but not yet mined, and <strong>the agent keeps its
+          authority until it is</strong>. Waiting for the receipt before calling
+          it done — a hash is not a confirmation.
+          {h.revokeTxHash ? (
+            <p className="hint">
+              Transaction <code>{h.revokeTxHash}</code>
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {h.phase === 'revoked' ? (
         <div className="banner">
-          Revoked. aomi-side signing stopped immediately — but call{' '}
-          <code>revokeTradingForAccount</code> too, so the fence does not depend on us
-          being reachable.
+          <strong>Revoked, confirmed on chain.</strong> The venue has removed the
+          agent from this account&apos;s trader set, so it cannot place an order
+          — no aomi call was involved, and none is needed.
           <button className="btn" onClick={h.reset}>
             Start over
           </button>

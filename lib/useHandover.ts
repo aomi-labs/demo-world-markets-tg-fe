@@ -20,7 +20,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createWalletClient, custom, type Address } from 'viem';
+import { createPublicClient, createWalletClient, custom, http, type Address } from 'viem';
 
 import {
   QUOTE_SYMBOL,
@@ -28,9 +28,16 @@ import {
   concordUserAbi,
   exchangeAddress,
   marketKey,
-  megaeth,
+  venueChain,
 } from '@/lib/venue';
 import type { HandoverStatus, IssuedHandover } from '@/lib/types';
+import {
+  AomiApiError,
+  activateHandover,
+  connectWallet,
+  getHandoverStatus,
+  issueHandover,
+} from '@/lib/aomi';
 
 /** Poll cadence while waiting for a scan. Fast enough to feel live, slow enough to be polite. */
 export const POLL_MS = 2000;
@@ -41,7 +48,19 @@ export type Phase =
   | 'claimed'
   | 'granting'
   | 'active'
-  | 'revoked';
+  /** Revocation is on chain but not yet mined. */
+  | 'revoking'
+  | 'revoked'
+  /**
+   * The session died before the page collected the claim result — it expired,
+   * or the one delivery was lost to a dropped connection.
+   *
+   * A distinct phase because there is deliberately no way back: no re-auth, no
+   * renewal. The only move is a fresh issue and a fresh QR, and the copy has to
+   * say so plainly rather than leaving the user waiting on a QR that can no
+   * longer report anything.
+   */
+  | 'session-lost';
 
 // Re-exported so the views import venue facts from one place.
 export { VENUE_MARKETS, QUOTE_SYMBOL, marketKey } from '@/lib/venue';
@@ -190,10 +209,18 @@ export function useHandover(botRegistrationId: string) {
   const [issued, setIssued] = useState<IssuedHandover | null>(null);
   const [status, setStatus] = useState<HandoverStatus | null>(null);
   const [grantTxHash, setGrantTxHash] = useState<string | null>(null);
+  const [revokeTxHash, setRevokeTxHash] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /**
+   * The status session. A ref rather than state because it is a credential:
+   * state ends up in DevTools, in error payloads, and in anything that
+   * serializes this hook's return value. Nothing renders it, so nothing needs
+   * a re-render when it changes.
+   */
+  const sessionRef = useRef<string | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -299,7 +326,7 @@ export function useHandover(botRegistrationId: string) {
       context: {
         summary: brief.trim(),
         venue: 'world-markets',
-        chain_id: megaeth.id,
+        chain_id: venueChain.id,
         world: {
           account_id: Number(accountId.trim()) || null,
           owner_wallet: ownerWallet || null,
@@ -312,55 +339,96 @@ export function useHandover(botRegistrationId: string) {
     [accountId, brief, alerts, ownerWallet, mandate],
   );
 
+  /**
+   * Poll with the status session until the claim result arrives.
+   *
+   * The read that returns `agent_address` is the same read that spends the
+   * session, so this stops on the first non-pending answer — asking again would
+   * get a refusal, and that refusal is not an error worth showing.
+   *
+   * A `401` is the one response that ends the flow rather than pausing it: the
+   * session is gone, and nothing renews it. Other failures are treated as
+   * transient, because a dropped request is not a failed handover.
+   */
   const startPolling = useCallback(
-    (handoverId: number) => {
+    (handoverId: number, session: string) => {
       stopPolling();
       pollRef.current = setInterval(async () => {
         try {
-          const response = await fetch(
-            `/api/handover/${botRegistrationId}/${handoverId}`,
-            { cache: 'no-store' },
-          );
-          if (!response.ok) return;
-          const next: HandoverStatus = await response.json();
+          const next = await getHandoverStatus(botRegistrationId, handoverId, session);
           setStatus(next);
-          if (next.state === 'claimed') {
+          if (next.restart_required) {
+            // The handover is over and produced nothing — the QR ran out, or it
+            // was revoked. The session is still fine, which is exactly why the
+            // backend says so in the body rather than by refusing: a 401 here
+            // would read as "your credential broke" and send the user looking
+            // in the wrong place.
+            stopPolling();
+            setPhase('session-lost');
+            setError(
+              next.state === 'revoked'
+                ? 'This handover was revoked. Generate a new QR code to start again.'
+                : 'The QR code expired before it was scanned. Generate a new one.',
+            );
+            return;
+          }
+          if (next.state !== 'pending') {
+            // Claimed: this response carried the agent address and consumed the
+            // session with it. Nothing left to poll for.
             stopPolling();
             setPhase('claimed');
-          } else if (next.state === 'expired' || next.state === 'revoked') {
-            stopPolling();
           }
-        } catch {
-          // Transient — keep polling. A dropped request is not a failed handover.
+        } catch (caught) {
+          if (caught instanceof AomiApiError && caught.status === 401) {
+            // Now unambiguous: the backend reports a dead handover in the body,
+            // so a refusal here means the *session* is gone — it timed out, or
+            // it was already spent collecting the result.
+            stopPolling();
+            setPhase('session-lost');
+            setError(
+              'This connection expired. Generate a new QR code and scan it again.',
+            );
+          }
+          // Anything else: keep polling.
         }
       }, POLL_MS);
     },
     [botRegistrationId, stopPolling],
   );
 
+  /**
+   * Signature one of two.
+   *
+   * Prompts for a wallet if none is connected — this is the first point where
+   * one is genuinely required, and asking earlier (before the user has seen
+   * what they are setting up) would be the wrong moment.
+   *
+   * The session lives in a ref, not in state: it is a credential, and putting
+   * it in state invites it into React DevTools, error boundaries and any future
+   * `JSON.stringify` of the hook's return value.
+   */
   const issue = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch('/api/handover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(issueBody),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error ?? `HTTP ${response.status}`);
+      const owner = ownerWallet ?? (await connectWallet());
+      setOwnerWallet(owner);
+
+      const payload = await issueHandover(owner, issueBody);
+      if (!payload.session) {
+        throw new Error('aomi issued no session — cannot follow this handover.');
       }
+      sessionRef.current = payload.session;
       setIssued(payload);
       setStatus(null);
       setPhase('awaiting-scan');
-      startPolling(payload.handover_id);
+      startPolling(payload.handover_id, payload.session);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'issue failed');
     } finally {
       setBusy(false);
     }
-  }, [issueBody, startPolling]);
+  }, [issueBody, ownerWallet, startPolling]);
 
   /**
    * The custody step. Signed by the account owner in this browser session,
@@ -376,7 +444,7 @@ export function useHandover(botRegistrationId: string) {
       if (!ethereum) throw new Error('no injected wallet found');
 
       const wallet = createWalletClient({
-        chain: megaeth,
+        chain: venueChain,
         transport: custom(ethereum as Parameters<typeof custom>[0]),
       });
       const [account] = await wallet.requestAddresses();
@@ -399,55 +467,99 @@ export function useHandover(botRegistrationId: string) {
     }
   }, [accountId, status?.agent_address]);
 
+  /**
+   * Signature two of two — the moment the agent key gains the ability to sign.
+   *
+   * aomi does not take the grant transaction on trust. It reads the account's
+   * live trader set and refuses if the agent is not in it, so a 409 here
+   * usually means the grant has not confirmed yet rather than that anything is
+   * wrong. Say so, and let the user try again.
+   */
   const activate = useCallback(async () => {
-    if (!issued || !grantTxHash) return;
+    if (!issued || !grantTxHash || !ownerWallet) return;
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/handover/${botRegistrationId}/${issued.handover_id}/activate`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ grantTxHash }),
-        },
+      const payload = await activateHandover(
+        ownerWallet,
+        botRegistrationId,
+        issued.handover_id,
       );
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
       setStatus(payload);
       setPhase('active');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'activate failed');
+      const message =
+        caught instanceof AomiApiError && caught.status === 409
+          ? 'The venue has not registered your authorization yet. Wait for the transaction to confirm, then try again.'
+          : caught instanceof Error
+            ? caught.message
+            : 'activate failed';
+      setError(message);
     } finally {
       setBusy(false);
     }
-  }, [botRegistrationId, grantTxHash, issued]);
+  }, [botRegistrationId, grantTxHash, issued, ownerWallet]);
 
+  /**
+   * Stop the agent, on chain.
+   *
+   * There is no browser revoke against aomi: that route stays on the platform
+   * bearer, which this app does not hold. What the owner *can* do unilaterally
+   * is take the authority back at the venue, which is the stronger of the two
+   * fences anyway — aomi's key cannot trade for an account that no longer lists
+   * it as a trader, whatever aomi's own record says.
+   */
   const revoke = useCallback(async () => {
-    if (!issued) return;
+    if (!status?.agent_address) return;
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(
-        `/api/handover/${botRegistrationId}/${issued.handover_id}/revoke`,
-        { method: 'POST' },
-      );
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
-      setStatus(payload);
+      const ethereum = (globalThis as { ethereum?: unknown }).ethereum;
+      if (!ethereum) throw new Error('no injected wallet found');
+      const wallet = createWalletClient({
+        chain: venueChain,
+        transport: custom(ethereum as Parameters<typeof custom>[0]),
+      });
+      const [account] = await wallet.requestAddresses();
+      const hash = await wallet.writeContract({
+        account,
+        address: exchangeAddress,
+        abi: concordUserAbi,
+        functionName: 'revokeTradingForAccount',
+        args: [BigInt(accountId), status.agent_address as Address],
+      });
+      setRevokeTxHash(hash);
+
+      // `writeContract` returns as soon as the transaction is *broadcast*. The
+      // agent keeps its authority until this is mined, so telling the user
+      // "access revoked" here would be a lie in the one place a lie is most
+      // expensive — someone deciding whether they still need to act.
+      setPhase('revoking');
+      const receipt = await createPublicClient({
+        chain: venueChain,
+        transport: http(),
+      }).waitForTransactionReceipt({ hash });
+      if (receipt.status !== 'success') {
+        throw new Error('The revocation transaction reverted. The agent still has access.');
+      }
       setPhase('revoked');
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'revoke failed');
+      // Back to active: whatever went wrong, the agent still holds its
+      // authority, and the UI must keep offering the way to take it back.
+      setPhase('active');
     } finally {
       setBusy(false);
     }
-  }, [botRegistrationId, issued]);
+  }, [accountId, status?.agent_address]);
 
   const reset = useCallback(() => {
     stopPolling();
+    sessionRef.current = null;
     setIssued(null);
     setStatus(null);
     setGrantTxHash(null);
+    setRevokeTxHash(null);
     setError(null);
     setPhase('setup');
     setSetupStarted(false);
@@ -491,6 +603,7 @@ export function useHandover(botRegistrationId: string) {
     issued,
     status,
     grantTxHash,
+    revokeTxHash,
     error,
     busy,
     expired: status?.state === 'expired',
