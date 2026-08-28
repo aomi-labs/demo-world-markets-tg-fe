@@ -293,6 +293,11 @@ export function useHandover(botRegistrationId: string) {
    */
   const issueBody = useMemo(
     () => ({
+      // The backend pins this identifier to the venue configuration, but it
+      // is still required on the wire so both channels share one request
+      // shape. Keeping it in this object also makes the Integration preview
+      // exactly match the request that `issue()` sends.
+      bot_registration_id: botRegistrationId,
       platform_account_ref: accountId.trim(),
 
       /**
@@ -336,7 +341,7 @@ export function useHandover(botRegistrationId: string) {
       mandate,
       ttl_seconds: 300,
     }),
-    [accountId, brief, alerts, ownerWallet, mandate],
+    [botRegistrationId, accountId, brief, alerts, ownerWallet, mandate],
   );
 
   /**
