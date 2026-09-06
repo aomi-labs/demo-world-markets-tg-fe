@@ -347,7 +347,7 @@ export function useHandover(botRegistrationId: string) {
   /**
    * Poll with the status session until the claim result arrives.
    *
-   * The read that returns `agent_address` is the same read that spends the
+   * The read that returns `trading_address` is the same read that spends the
    * session, so this stops on the first non-pending answer — asking again would
    * get a refusal, and that refusal is not an error worth showing.
    *
@@ -440,8 +440,8 @@ export function useHandover(botRegistrationId: string) {
    * never by the agent and never in Telegram.
    */
   const grantVenueAuthority = useCallback(async () => {
-    if (!status?.agent_address) {
-      setError('Telegram has not supplied an agent address yet. Re-open the claimed handover and try again.');
+    if (!status?.trading_address) {
+      setError('Telegram has not supplied a trading address yet. Re-open the claimed handover and try again.');
       return;
     }
     if (!ownerWallet) {
@@ -471,7 +471,7 @@ export function useHandover(botRegistrationId: string) {
         address: exchangeAddress,
         abi: concordUserAbi,
         functionName: 'allowTradingForAccount',
-        args: [BigInt(accountId), status.agent_address as Address],
+        args: [BigInt(accountId), status.trading_address as Address],
       });
       setGrantTxHash(hash);
       // Deliberately NOT auto-activating: activate is an assertion that this
@@ -482,7 +482,7 @@ export function useHandover(botRegistrationId: string) {
     } finally {
       setBusy(false);
     }
-  }, [accountId, ownerWallet, status?.agent_address]);
+  }, [accountId, ownerWallet, status?.trading_address]);
 
   /**
    * Signature two of two — the moment the agent key gains the ability to sign.
@@ -527,7 +527,7 @@ export function useHandover(botRegistrationId: string) {
    * it as a trader, whatever aomi's own record says.
    */
   const revoke = useCallback(async () => {
-    if (!status?.agent_address) return;
+    if (!status?.trading_address) return;
     setBusy(true);
     setError(null);
     try {
@@ -543,7 +543,7 @@ export function useHandover(botRegistrationId: string) {
         address: exchangeAddress,
         abi: concordUserAbi,
         functionName: 'revokeTradingForAccount',
-        args: [BigInt(accountId), status.agent_address as Address],
+        args: [BigInt(accountId), status.trading_address as Address],
       });
       setRevokeTxHash(hash);
 
@@ -568,7 +568,7 @@ export function useHandover(botRegistrationId: string) {
     } finally {
       setBusy(false);
     }
-  }, [accountId, status?.agent_address]);
+  }, [accountId, status?.trading_address]);
 
   const reset = useCallback(() => {
     stopPolling();

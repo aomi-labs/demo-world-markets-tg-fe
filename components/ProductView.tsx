@@ -268,8 +268,8 @@ export function ProductView({ h }: { h: Handover }) {
             {h.status?.claimed_handle ? `@${h.status.claimed_handle}` : 'your Telegram'}
           </h2>
           <p className="card__lede">
-            Your agent&apos;s address:{' '}
-            <code>{h.status?.agent_address ? short(h.status.agent_address) : '—'}</code>
+            Your trading account:{' '}
+            <code>{h.status?.trading_address ? short(h.status.trading_address) : '—'}</code>
           </p>
 
           <dl className="approve">

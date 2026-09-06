@@ -18,7 +18,7 @@
 
 export type HandoverStatement =
   | { action: 'issue'; accountId: string }
-  | { action: 'activate'; handoverId: number; agentAddress: string };
+  | { action: 'activate'; handoverId: number; tradingAddress: string };
 
 /** Matches `VENUE_LABEL` in the Rust module. Read by a human in a wallet popup. */
 const VENUE_LABEL = 'Aomi World Markets';
@@ -33,7 +33,7 @@ export function renderStatement(statement: HandoverStatement): string {
   const head = `Authorize ${VENUE_LABEL} ${statement.action}:`;
   return statement.action === 'issue'
     ? `${head} account=${statement.accountId}`
-    : `${head} handover=${statement.handoverId} agent=${statement.agentAddress}`;
+    : `${head} handover=${statement.handoverId} trading=${statement.tradingAddress}`;
 }
 
 /**
