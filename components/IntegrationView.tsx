@@ -275,7 +275,7 @@ export function IntegrationView({ h }: { h: Handover }) {
         <p className="hint">
           The session reads <em>this</em> handover&apos;s status and nothing
           else — it cannot activate, cannot revoke, and has no renewal path. The
-          call that returns <code>agent_address</code> is the same call that
+          call that returns <code>trading_address</code> is the same call that
           spends it, so poll until the state leaves <code>pending</code> and then
           stop. A later refusal is the session having done its job, not a fault;
           a refusal before that means it expired, and the only way on is a fresh
@@ -317,7 +317,7 @@ export function IntegrationView({ h }: { h: Handover }) {
       >
         <Endpoint
           method="TX"
-          path="allowTradingForAccount(uint64 accountId, address agent)"
+          path="allowTradingForAccount(uint64 accountId, address tradingAccount)"
           auth="account owner's wallet · no aomi call"
         />
         {h.status?.state === 'claimed' || h.phase === 'granting' || h.phase === 'active' ? (
@@ -328,17 +328,18 @@ export function IntegrationView({ h }: { h: Handover }) {
                 <dd>{h.status?.claimed_handle ? `@${h.status.claimed_handle}` : '—'}</dd>
               </div>
               <div>
-                <dt>Agent address</dt>
+                <dt>Trading address</dt>
                 <dd>
-                  <code>{h.status?.agent_address ?? '—'}</code>
+                  <code>{h.status?.trading_address ?? '—'}</code>
                 </dd>
               </div>
             </dl>
             <p className="hint">
               This address did not exist when the QR was rendered. It is provisioned
               during the claim — which is exactly why a stolen QR grants nothing.
-              Right now the key <strong>cannot sign</strong>; it is armed at
-              activation, after you grant.
+              The agent signer remains locked until activation. This trading
+              account is the only address World authorizes and the only
+              on-chain caller used for execution.
             </p>
             {h.grantTxHash ? (
               <p className="hint">
@@ -350,7 +351,7 @@ export function IntegrationView({ h }: { h: Handover }) {
                 onClick={h.grantVenueAuthority}
                 disabled={h.busy || h.phase === 'active'}
               >
-                {h.busy ? 'confirm in wallet…' : 'allowTradingForAccount'}
+                {h.busy ? 'sign in wallet…' : 'allowTradingForAccount'}
               </button>
             )}
           </>

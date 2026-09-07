@@ -75,11 +75,10 @@ export interface HandoverStatus {
   platform_account_ref?: string;
   /** Telegram @handle of whoever claimed, once `claimed`. */
   claimed_handle: string | null;
-  /**
-   * The agent address to grant venue authority to. Null until `claimed` —
-   * the key is provisioned during the claim, not at issue time.
-   */
-  agent_address: string | null;
+  /** The AA account authorized at World and used as the on-chain caller. */
+  trading_address: string | null;
+  /** Para-managed owner/signer metadata; never the World grant target. */
+  agent_signer_address: string | null;
   expires_at: number;
   claimed_at: number | null;
   activated_at: number | null;
